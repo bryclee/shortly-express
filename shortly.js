@@ -2,7 +2,8 @@ var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
 var bodyParser = require('body-parser');
-
+var bcrypt = require('bcrypt-nodejs');
+var session = require('express-session');
 
 var db = require('./app/config');
 var Users = require('./app/collections/users');
@@ -21,19 +22,23 @@ app.use(bodyParser.json());
 // Parse forms (signup/login)
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(__dirname + '/public'));
+app.use(session({
+  secret: 'abcdefgh',
+  duration: 5 * 60 * 1000,
+}));
 
 
-app.get('/', 
+app.get('/', util.checkAuthenticated,
 function(req, res) {
   res.render('index');
 });
 
-app.get('/create', 
+app.get('/create', util.checkAuthenticated,
 function(req, res) {
   res.render('index');
 });
 
-app.get('/links', 
+app.get('/links', util.checkAuthenticated,
 function(req, res) {
   Links.reset().fetch().then(function(links) {
     res.send(200, links.models);
@@ -78,7 +83,55 @@ function(req, res) {
 // Write your authentication routes here
 /************************************************************/
 
+app.get('/login', function(req, res) {
+  res.render("login");
+});
 
+app.post('/login', function(req, res) {
+  //get the username from req
+  new User({username: req.body.username}).fetch()
+  .then(function(user){
+    if (!user){
+      res.redirect('/login');
+    } else {
+      bcrypt.compare(req.body.password, user.get('password'), function(err, result){
+        if (result === true){
+          // also need to establish a session
+          util.createSession(req);
+          res.redirect('/');
+        } else {
+          res.redirect('/login');
+        }
+      });
+    }
+  });
+});
+
+app.get('/signup', function(req, res) {
+  res.render("signup");
+});
+
+app.post('/signup', function(req, res) {
+  new User({username: req.body.username}).fetch()//get the username from req
+  .then(function(user) {
+  //check if username exists in database
+    if (!user) {
+      //create the user with password
+      new User({username: req.body.username, password: req.body.password}).save()
+      .then(function() {
+        util.createSession(req);
+        res.redirect('/');
+      });
+    } else {
+      res.redirect('/login');
+    }
+  });
+});
+
+app.get('/logout', function(req, res) {
+  req.session.destroy();
+  res.redirect('/login');
+});
 
 /************************************************************/
 // Handle the wildcard route last - if all other routes fail
